@@ -289,15 +289,36 @@ function getWorker(){
 window.addEventListener('load',()=>{try{getWorker()}catch(e){}});
 
 function toCanvas(file){return new Promise((res,rej)=>{
-  const im=new Image();im.onload=()=>{const s=Math.min(1,900/im.width),c=document.createElement('canvas');
-    c.width=im.width*s;c.height=im.height*s;const x=c.getContext('2d');x.drawImage(im,0,0,c.width,c.height);res(c)};
+  const im=new Image();im.onload=()=>{const s=Math.min(1,1600/im.width),c=document.createElement('canvas');
+    c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);res(c)};
   im.onerror=rej;im.src=URL.createObjectURL(file)})}
+function isDark(c){
+  const t=document.createElement('canvas');t.width=t.height=32;const x=t.getContext('2d');x.drawImage(c,0,0,32,32);
+  const d=x.getImageData(0,0,32,32).data;let m=0;for(let i=0;i<d.length;i+=4)m+=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+  return m/1024<110;
+}
+function prep(c,{crop,inv,w}){
+  const y0=crop?crop[0]:0,y1=crop?crop[1]:1,sh=c.height*(y1-y0),o=document.createElement('canvas');
+  o.width=w;o.height=Math.round(sh*w/c.width);
+  const x=o.getContext('2d');x.drawImage(c,0,c.height*y0,c.width,sh,0,0,o.width,o.height);
+  const im=x.getImageData(0,0,o.width,o.height),d=im.data,h=new Uint32Array(256);
+  for(let i=0;i<d.length;i+=4){let g=(.299*d[i]+.587*d[i+1]+.114*d[i+2])|0;if(inv)g=255-g;d[i]=g;h[g]++}
+  const n=o.width*o.height;let lo=0,hi=255,cu=0;
+  for(let v=0;v<256;v++){cu+=h[v];if(cu>=n*.02){lo=v;break}}
+  cu=0;for(let v=0;v<256;v++){cu+=h[v];if(cu>=n*.98){hi=v;break}}
+  const k=255/Math.max(1,hi-lo);
+  for(let i=0;i<d.length;i+=4){const v=Math.max(0,Math.min(255,(d[i]-lo)*k));d[i]=d[i+1]=d[i+2]=v}
+  x.putImageData(im,0,0);return o;
+}
+const LAT={a:'а',A:'А',B:'В',c:'с',C:'С',e:'е',E:'Е',H:'Н',i:'і',I:'І',k:'к',K:'К',M:'М',o:'о',O:'О',p:'р',P:'Р',T:'Т',x:'х',X:'Х',y:'у'};
+const fixLat=t=>t.split('\n').map(l=>(l.match(/[а-яіїєґА-ЯІЇЄҐ]/g)||[]).length>=3?l.replace(/[aABcCeEHiIkKMoOpPTxXy]/g,m=>LAT[m]):l).join('\n');
 
-function parse(t){
+function parse(t,loose){
   t=t.replace(/(\d)[,](\d)/g,'$1.$2').replace(/(\d)\s+(\d{3})\b/g,'$1$2');
   const o={};
   const sums=[...t.matchAll(/(\d+(?:\.\d+)?)\s*(?:₴|грн|uah)(?!\s*\/)/gi)].map(x=>+x[1]);
   if(sums.length)o.sum=Math.max(...sums);
+  else if(loose){const m=t.match(/(?:^|\s)(\d{2,4}(?:\.\d{1,2})?)(?!\d|\.\d|\s*(?:км|km|хв|min|%))/);if(m)o.sum=+m[1]}
   if(/bolt|вирахування|комісі/i.test(t))o.plat='bolt';
   else if(/uklon|укл|поїздок\s*:|баланс|₴\s*\/\s*км/i.test(t))o.plat='uklon';
   const pairs=[...t.matchAll(/(\d+)\s*(?:хв|min|мин)[^\d\n]{0,5}(\d+(?:\.\d+)?)\s*(?:км|km)/gi)];
@@ -320,10 +341,16 @@ $('shot').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;e.target.value='';
   const T=performance.now();rawPtt=0;$('st').textContent='Розпізнаю…';
   try{
-    const c=await toCanvas(f);await getWorker();
-    const r=await worker.recognize(c);
-    $('raw').textContent=r.data.text;
-    const o=parse(r.data.text);
+    const base=await toCanvas(f);await getWorker();
+    const r=await worker.recognize(prep(base,{inv:isDark(base),w:1300}));
+    let txt=fixLat(r.data.text),o=parse(txt);
+    if(!o.sum){
+      const r2=await worker.recognize(prep(base,{crop:[0,.25],inv:false,w:1400}));
+      const t2=fixLat(r2.data.text),o2=parse(t2,true);
+      if(o2.sum)o.sum=o2.sum;
+      txt+='\n--- верх екрана ---\n'+t2;
+    }
+    $('raw').textContent=txt;
     if(o.plat){cfg.plat=o.plat;saveCfg();loadPlat()}
     ['sum','pu','tr','kpu','ktr'].forEach(k=>{if(o[k])$(k).value=o[k]});
     if(o.a1){$('adr1').value=o.a1;$('adr2').value=o.a2}
