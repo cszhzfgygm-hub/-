@@ -38,7 +38,7 @@ details{background:var(--panel);border:1px solid var(--line);border-radius:12px;
 summary{font-weight:600}
 .log{font-size:13px;color:var(--mute);margin-top:8px}
 .log div{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}
-#map{height:60vh;border-radius:12px;margin-top:10px;background:#222}
+#map{height:55vh;min-height:320px;border-radius:12px;margin-top:10px;background:#222}
 input.t{font-size:15px;font-weight:500}
 [hidden]{display:none!important}
 button.sm{padding:8px 12px;width:auto;font-size:14px}
@@ -139,7 +139,7 @@ pre{white-space:pre-wrap;font-size:11px;color:var(--mute)}
 
 <details><summary>Що розпізнав скрін</summary><pre id="raw">—</pre></details>
 
-<div class="log" style="text-align:center">версія v9</div>
+<div class="log" style="text-align:center">версія v10</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
@@ -326,12 +326,13 @@ const fixAddr=l=>l.replace(/[A-Za-zА-Яа-яІіЇїЄєҐґ]+/g,w=>{
   if(!/[а-яіїєґА-ЯІЇЄҐ]/.test(w)||!/[a-zA-Z]/.test(w))return w;
   return w.replace(/[a-zA-Z]/g,(ch,i)=>{const m=PH[ch];return m?(i===0?m.toUpperCase():m):ch})});
 
+function crossSum(o){const est=o.rate&&o.ktr?Math.round(o.rate*o.ktr):0;if(est&&(!o.sum||(o.sumLoose&&Math.abs(o.sum-est)/est>.12))){o.sum=est;o.sumEst=1;delete o.sumLoose}}
 function parse(t,loose){
   t=t.replace(/(\d)[,](\d)/g,'$1.$2').replace(/(\d)\s+(\d{3})\b/g,'$1$2');
   const o={};
   const sums=[...t.matchAll(/(\d+(?:\.\d+)?)\s*(?:₴|грн|uah)(?!\s*\/)/gi)].map(x=>+x[1]);
   if(sums.length)o.sum=Math.max(...sums);
-  else if(loose){const m=t.match(/(?:^|\s)(\d{2,4}(?:\.\d{1,2})?)(?!\d|\.\d|\s*(?:км|km|хв|min|%))/);if(m)o.sum=+m[1]}
+  else if(loose){const m=t.match(/(?:^|\s)(\d{2,4}(?:\.\d{1,2})?)(?!\d|\.\d|\s*(?:км|km|хв|min|%))/);if(m&&+m[1]>=30){o.sum=+m[1];o.sumLoose=1}}
   if(/bolt|вирахування|комісі/i.test(t))o.plat='bolt';
   else if(/uklon|укл|поїздок\s*:|баланс|₴\s*\/\s*км/i.test(t))o.plat='uklon';
   const pairs=[...t.matchAll(/(\d+)\s*(?:хв|min|мин)[^\d\n]{0,5}(\d+(?:\.\d+)?)\s*(?:км|km)/gi)];
@@ -349,7 +350,7 @@ function parse(t,loose){
   const al=M.filter(x=>/(вулиц|вул\.|проспект|просп\.|площа|пл\.|провулок|бульвар|шосе|набережна|алея|узвіз|майдан)/i.test(x));
   if(al.length>=2){o.a1=fixAddr(al[0]);o.a2=fixAddr(al[1])}
   const rm=t.match(/(\d+\.\d+)\s*₴\s*\/\s*км/);if(rm)o.rate=+rm[1];
-  if(!o.sum&&o.rate&&o.ktr)o.sum=Math.round(o.rate*o.ktr);
+  crossSum(o);
   return o;
 }
 $('shot').onchange=async e=>{
@@ -364,8 +365,10 @@ $('shot').onchange=async e=>{
       for(const inv of [false,true]){
         const r2=await worker.recognize(prep(base,{crop:[.12,.27],inv,w:1600}));
         const o2=parse(r2.data.text,true);txt+='\n--- верх екрана'+(inv?' (інверсія)':'')+' ---\n'+r2.data.text;
-        if(o2.sum){o.sum=o2.sum;break}
+        if(!o.rate&&o2.rate)o.rate=o2.rate;
+        if(o2.sum){o.sum=o2.sum;o.sumLoose=o2.sumLoose;break}
       }
+      crossSum(o);
       try{await worker.setParameters({tessedit_pageseg_mode:'3'})}catch(e){}
     }
     $('raw').textContent=txt;
@@ -383,8 +386,10 @@ $('shot').onchange=async e=>{
       if(o.ktr)$('tr').value=Math.max(1,Math.round(o.ktr/v*60));
       note='Хвилин на екрані немає: оцінив за км при '+v+' км/год (TomTom точніше, якщо вставити ключ).';
     }
+    const warn=!o.sum?' · суму не знайдено, введи вручну':(o.sumLoose||o.sumEst?' · суму розпізнано приблизно, перевір':'');
+    if(!o.sum||o.sumLoose||o.sumEst){try{$('sum').focus();$('sum').select()}catch(e){}}
     calc();
-    $('st').textContent=note+' · '+((performance.now()-T)/1000).toFixed(1)+' с';
+    $('st').textContent=note+warn+' · '+((performance.now()-T)/1000).toFixed(1)+' с';
   }catch(x){$('st').textContent=typeof Tesseract==='undefined'?'Модуль розпізнавання не завантажився: відкрий сторінку з github.io у Safari (у чаті інтернет заблоковано). Введи вручну.':'Помилка розпізнавання: '+(x&&x.message||x)+'. Введи вручну.'}
 };
 
@@ -394,12 +399,19 @@ const tt=async u=>{const r=await fetch(u);if(!r.ok)throw new Error('TomTom '+r.s
 const gps=()=>new Promise((ok,no)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>ok([p.coords.latitude,p.coords.longitude]),no,{enableHighAccuracy:true,timeout:6000,maximumAge:15000}):no());
 const LV=[49.8397,24.0297];
 const dist=(a,b)=>{const R=6371,r=x=>x*Math.PI/180,dl=r(b[0]-a[0]),dn=r(b[1]-a[1]);const h=Math.sin(dl/2)**2+Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+const STR=/^(вулиця|вул\.?|проспект|просп\.?|площа|пл\.?|провулок|пров\.?|бульвар|шосе|набережна|алея|узвіз|майдан)$/i;
+const nz=x=>(x||'').toLowerCase().replace(/[іїи]/g,'и').replace(/[’'ʼ`]/g,'');
+function stemOf(a){const w=a.replace(/\(.*?\)/g,' ').replace(/[,\d]/g,' ').split(/\s+/).filter(x=>x.length>3&&!STR.test(x)).sort((x,y)=>y.length-x.length);return w[0]?nz(w[0]).slice(0,5):''}
+function numOf(a){const m=a.replace(/\(.*?\)/g,' ').match(/(\d+)\s*[А-Яа-я]?\s*$/);return m?m[1]:''}
 async function geo(a,c){
+  const st=stemOf(a),nm=numOf(a);
   const q=encodeURIComponent(a.replace(/[()]/g,' ').replace(/\s+/g,' ').trim());
-  const base='https://api.tomtom.com/search/2/search/'+q+'.json?key='+cfg.key+'&limit=1&countrySet=UA&language=uk-UA&lat='+c[0]+'&lon='+c[1]+'&radius=70000';
-  let d=await tt(base+'&idxSet=Addr,Str,PAD');
-  if(!d.results||!d.results.length)d=await tt(base);
-  const p=d.results&&d.results[0];if(!p)throw new Error('Адресу не знайдено поруч: '+a+'. Поправ її вручну.');
+  const base='https://api.tomtom.com/search/2/search/'+q+'.json?key='+cfg.key+'&limit=10&countrySet=UA&language=uk-UA&lat='+c[0]+'&lon='+c[1]+'&radius=70000';
+  const ok=x=>nz((x.address&&x.address.streetName||'')+' '+(x.address&&x.address.freeformAddress||'')).includes(st);
+  const best=rs=>st?(rs.find(x=>ok(x)&&nm&&x.address&&x.address.streetNumber==nm)||rs.find(ok)):rs[0];
+  let rs=(await tt(base+'&idxSet=Addr,Str,PAD')).results||[],p=best(rs);
+  if(!p){rs=(await tt(base)).results||[];p=best(rs)}
+  if(!p)throw new Error('TomTom не знайшов «'+a+'»'+(rs[0]?' (найближче: '+rs[0].address.freeformAddress+')':'')+'. Поправ адресу вручну.');
   const ad=p.address||{},inCity=/Львів/i.test(ad.municipality||'');
   const r=[p.position.lat,p.position.lon];
   r.loc=inCity?(ad.municipalitySubdivision||ad.localName||''):(ad.localName||ad.municipality||'');
@@ -436,17 +448,22 @@ async function runTT(){
 }
 $('ttb').onclick=runTT;
 let flow=null;
-const flowUrl=()=>'https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key='+cfg.key+'&t='+Date.now();
+const flowUrl=()=>'https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?key='+cfg.key+'&t='+Date.now();
 function initMap(){
   if(map)return;
   if(!cfg.key){$('mst').textContent='Встав ключ TomTom у налаштуваннях, щоб побачити карту';return}
-  $('mst').textContent='';
-  map=L.map('map').setView(LV,12);
-  L.tileLayer('https://api.tomtom.com/map/1/tile/basic/night/{z}/{x}/{y}.png?key='+cfg.key+'&language=uk-UA',{maxZoom:18,attribution:'© TomTom'}).addTo(map);
-  flow=L.tileLayer(flowUrl(),{maxZoom:18,opacity:.9}).addTo(map);
-  setTimeout(()=>map.invalidateSize(),300);
+  if(typeof L==='undefined'){$('mst').textContent='Бібліотека карти не завантажилась (потрібен інтернет)';return}
+  try{
+    $('mst').textContent='';
+    map=L.map('map').setView(LV,12);
+    const bad=n=>{let c=0;return()=>{if(!c++)$('mst').textContent='Шар «'+n+'» не завантажується. Перевір ключ TomTom (потрібні Map Display і Traffic API) та обмеження за доменом.'}};
+    const b=L.tileLayer('https://api.tomtom.com/map/1/tile/basic/night/{z}/{x}/{y}.png?key='+cfg.key+'&language=uk-UA',{maxZoom:18,attribution:'© TomTom'}).addTo(map);
+    flow=L.tileLayer(flowUrl(),{maxZoom:18,opacity:.9}).addTo(map);
+    b.on('tileerror',bad('карта'));flow.on('tileerror',bad('трафік'));
+    setTimeout(()=>map.invalidateSize(),300);
+  }catch(e){$('mst').textContent='Помилка карти: '+(e.message||e)}
 }
-setInterval(()=>{if(flow)flow.setUrl(flowUrl())},180000);
+setInterval(()=>{if(flow)flow.setUrl(flowUrl())},60000);
 $('mref').onclick=()=>{if(flow)flow.setUrl(flowUrl())};
 $('mme').onclick=async()=>{if(!map)return;try{const p=await gps();map.setView(p,14);L.circleMarker(p,{radius:8,color:'#34c47c'}).addTo(map)}catch(e){$('mst').textContent='GPS недоступний'}};
 
