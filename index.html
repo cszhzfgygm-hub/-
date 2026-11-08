@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Брати?">
+<meta name="theme-color" content="#15171b">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<title>Брати чи ні</title>
+<style>
+:root{color-scheme:dark;--bg:#15171b;--panel:#1f2228;--line:#2d3139;--tx:#eceef2;--mute:#8d94a1;--ok:#34c47c;--bad:#ef5350;--warn:#f0b429;--v:var(--mute)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+body{padding:env(safe-area-inset-top) 14px calc(env(safe-area-inset-bottom) + 24px);max-width:520px;margin:0 auto}
+.verdict{margin:14px 0;padding:22px 16px;border-radius:18px;background:var(--panel);border:2px solid var(--v);text-align:center}
+.verdict .w{font-size:44px;font-weight:800;color:var(--v);letter-spacing:.5px}
+.verdict .r{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+.verdict .s{color:var(--mute);margin-top:6px;font-size:14px}
+.row{display:grid;gap:10px;margin-bottom:10px}
+.c2{grid-template-columns:1fr 1fr}.c3{grid-template-columns:1fr 1fr 1fr}
+label{display:block;font-size:12px;color:var(--mute);margin-bottom:3px}
+input,select,textarea{width:100%;font:inherit;font-size:22px;font-weight:600;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--tx);font-variant-numeric:tabular-nums;-webkit-appearance:none}
+input.big{font-size:34px;text-align:center}
+input:focus{outline:2px solid var(--tx);outline-offset:1px}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.seg button{padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--mute);font:600 17px inherit;font-family:inherit}
+.seg button.on{background:var(--tx);color:var(--bg);border-color:var(--tx)}
+.tog{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.tog span{font-size:14px}
+.sw{position:relative;width:52px;height:30px;flex:none;border-radius:15px;background:var(--line);border:0;padding:0}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;transition:transform .15s}
+.sw.on{background:var(--ok)}.sw.on::after{transform:translateX(22px)}
+.btn{display:block;width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--tx);font:600 16px inherit;font-family:inherit;text-align:center}
+.btn.main{background:var(--tx);color:var(--bg);border-color:var(--tx)}
+details{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px}
+summary{font-weight:600}
+.log{font-size:13px;color:var(--mute);margin-top:8px}
+.log div{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}
+#map{height:60vh;border-radius:12px;margin-top:10px;background:#222}
+input.t{font-size:15px;font-weight:500}
+[hidden]{display:none!important}
+button.sm{padding:8px 12px;width:auto;font-size:14px}
+.x{padding:0 6px;margin-left:6px;color:var(--bad)}
+pre{white-space:pre-wrap;font-size:11px;color:var(--mute)}
+#st{font-size:13px;color:var(--warn);min-height:18px;margin:4px 0 8px}
+</style>
+</head>
+<body>
+
+<div class="verdict" id="vd">
+  <div class="w" id="vw">—</div>
+  <div class="r" id="vr">введи суму й час</div>
+  <div class="s" id="vs"></div>
+</div>
+
+<div id="act" hidden style="margin-bottom:10px">
+  <div class="tog" style="flex-wrap:wrap"><span id="actt"></span>
+    <span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="fin">Завершив</button><button class="btn sm" id="early">Закінчив раніше</button><button class="btn sm" id="stand">Стою</button><button class="btn sm" id="brk">Перерва</button></span></div>
+  <div class="row c2" id="earlyrow" hidden style="margin:8px 0 0"><input class="t" id="ago" type="number" inputmode="decimal" placeholder="скільки хв тому"><button class="btn" id="agok">ОК</button></div>
+  <div class="row" id="ownrow" hidden style="margin:8px 0 0"><input class="t" id="ownsum" type="number" inputmode="decimal" placeholder="Сума цієї поїздки, грн"></div>
+</div>
+
+<div class="row">
+  <label class="btn main" style="margin:0">📷 Скрін замовлення
+    <input id="shot" type="file" accept="image/*" hidden>
+  </label>
+  <div id="st"></div>
+</div>
+
+<div class="row"><div class="seg" id="plat">
+  <button data-p="bolt" class="on">Bolt</button><button data-p="uklon">Uklon</button>
+</div></div>
+
+<div class="row"><div><label>Сума поїздки, грн</label><input class="big" id="sum" type="number" inputmode="decimal" placeholder="0"></div></div>
+
+<div class="row">
+  <div class="tog"><span>Сума <b>до комісії</b> (брудна)</span><button class="sw" id="gross" aria-label="Сума до комісії"></button></div>
+  <div><label>Комісія зараз, %</label><input id="comm" type="number" inputmode="decimal" placeholder="напр. 20"></div>
+</div>
+
+<div class="row c2">
+  <div><label>Підʼїзд, хв</label><input id="pu" type="number" inputmode="decimal" placeholder="0"></div>
+  <div><label>Поїздка, хв</label><input id="tr" type="number" inputmode="decimal" placeholder="0"></div>
+</div>
+<details><summary>Додатково: дорога назад</summary><div class="log">Хвилини безоплатної дороги назад до жвавого місця. Якщо після висадки береш замовлення поруч — залиш порожнім: простій району вже враховується автоматично.</div><div class="row" style="margin-top:8px"><div><label>Назад, хв</label><input id="rt" type="number" inputmode="decimal" placeholder="0"></div></div></details>
+<div class="row c2">
+  <div><label>Підʼїзд, км</label><input id="kpu" type="number" inputmode="decimal" placeholder="0"></div>
+  <div><label>Поїздка, км</label><input id="ktr" type="number" inputmode="decimal" placeholder="0"></div>
+</div>
+
+<div class="row c2">
+  <div><label>Звідки (підʼїзд)</label><input class="t" id="adr1" type="text"></div>
+  <div><label>Куди</label><input class="t" id="adr2" type="text"></div>
+</div>
+<div class="row"><div><label>Район висадки (впливає на простій після поїздки)</label><input class="t" id="zone" type="text"></div></div>
+<div class="row"><button class="btn" id="ttb">⏱ Час із трафіком (TomTom)</button></div>
+
+<div class="row c2">
+  <button class="btn" id="take">✔ Взяв</button>
+  <button class="btn" id="clr">Очистити</button>
+</div>
+<div class="row"><button class="btn" id="own">▶ Своє замовлення (без оцінки)</button></div>
+
+<details>
+  <summary>Налаштування</summary>
+  <div class="row" style="margin-top:10px"><div><label>Норма заробітку, грн/год</label><input id="norm" type="number" inputmode="decimal"></div></div>
+  <div class="row"><div><label>Середня швидкість у місті, км/год (для оцінки часу, коли на екрані тільки км)</label><input id="spd" type="number" inputmode="decimal"></div></div>
+  <div class="row"><div><label>Ключ TomTom (зберігається лише в цьому телефоні)</label><input class="t" id="key" type="text" autocomplete="off" autocapitalize="off"></div></div>
+  <div class="row"><div><label>Місто за замовчуванням для адрес</label><input class="t" id="city" type="text"></div></div>
+  <div class="row"><div><label>Додатковий простій за район, хв (рядок: Район = хвилини)</label><textarea class="t" id="zp" rows="3" style="font-size:15px"></textarea></div></div>
+  <div class="log">Комісія і перемикач «до комісії» запамʼятовуються окремо для Bolt і Uklon. Пальне, TomTom і карта — наступні кроки.</div>
+</details>
+
+<details id="jd">
+  <summary>Журнал (<span id="jn">0</span>)</summary>
+  <div class="row c2" style="margin-top:10px">
+    <button class="btn" id="exp">Експорт</button>
+    <label class="btn" style="margin:0">Імпорт<input id="imp" type="file" accept="application/json,.json" hidden></label>
+  </div>
+  <details style="margin:10px 0"><summary>Додати поїздку вручну</summary>
+    <div class="row c2" style="margin-top:10px"><div><label>Сума, грн</label><input id="m_sum" type="number" inputmode="decimal"></div><div><label>Тривалість, хв</label><input id="m_dur" type="number" inputmode="decimal"></div></div>
+    <div class="row c2"><div><label>Скінчилась, хв тому</label><input id="m_ago" type="number" inputmode="decimal" placeholder="0"></div><div><label>Простій після, хв</label><input id="m_idle" type="number" inputmode="decimal"></div></div>
+    <div class="row"><div><label>Район (необовʼязково)</label><input class="t" id="m_zone" type="text"></div></div>
+    <button class="btn" id="m_add">Додати в журнал</button>
+    <div class="log">Платформа береться та, що вибрана зверху.</div>
+  </details>
+  <div class="log" id="jst"></div>
+  <div class="log" id="jl"></div>
+</details>
+
+<details id="md"><summary>Карта трафіку</summary>
+  <div class="row c2" style="margin-top:10px"><button class="btn" id="mref">Оновити</button><button class="btn" id="mme">Я тут</button></div>
+  <div class="log" id="mst"></div><div id="map"></div>
+</details>
+
+<details><summary>Що розпізнав скрін</summary><pre id="raw">—</pre></details>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const LS=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}};
+const SV=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+
+let cfg=LS('cfg',{norm:500,plat:'bolt',p:{bolt:{gross:false,comm:''},uklon:{gross:true,comm:''}}});
+let journal=LS('journal',[]);
+if(cfg.zp===undefined)cfg.zp='Зимна Вода = 25';
+let rawPtt=0;
+const num=id=>parseFloat(String($(id).value).replace(',','.'))||0;
+
+function loadPlat(){
+  document.querySelectorAll('#plat button').forEach(b=>b.classList.toggle('on',b.dataset.p===cfg.plat));
+  const p=cfg.p[cfg.plat];
+  $('gross').classList.toggle('on',p.gross);
+  $('comm').value=p.comm;
+  $('norm').value=cfg.norm;$('spd').value=cfg.spd||25;$('key').value=cfg.key||'';$('zp').value=cfg.zp||'';$('city').value=cfg.city||'Львів';
+}
+function saveCfg(){SV('cfg',cfg)}
+
+/* поправка і штрафи */
+const med=a=>{if(!a.length)return null;a=[...a].sort((x,y)=>x-y);const m=a.length>>1;return a.length%2?a[m]:(a[m-1]+a[m])/2};
+const hr=t=>new Date(t).getHours();
+const hd=(a,b)=>{const d=Math.abs(a-b);return Math.min(d,24-d)};
+const idleRecs=()=>journal.filter(j=>j.idleAfter!=null&&!j.brk&&j.tEnd);
+function base(h){
+  const r=idleRecs(),near=r.filter(j=>hd(hr(j.tEnd),h)<=1).map(j=>j.idleAfter);
+  if(near.length>=3)return med(near);
+  const all=r.map(j=>j.idleAfter);return all.length>=3?med(all):null;
+}
+function priors(){const o={};(cfg.zp||'').split('\n').forEach(l=>{const m=l.match(/^(.+?)\s*[=:]\s*(-?\d+(?:[.,]\d+)?)/);if(m)o[m[1].trim().toLowerCase()]=parseFloat(m[2].replace(',','.'))});return o}
+function pen(zone,h){
+  if(!zone)return{min:0,src:''};
+  const z=zone.toLowerCase(),ex=idleRecs().filter(j=>(j.zone||'').toLowerCase()===z).map(j=>({h:hr(j.tEnd),e:j.idleAfter-(base(hr(j.tEnd))||0)}));
+  const near=ex.filter(x=>hd(x.h,h)<=2).map(x=>x.e);
+  if(near.length>=3)return{min:med(near),src:'журнал, '+near.length+' поїздок в цей час'};
+  if(ex.length>=3)return{min:med(ex.map(x=>x.e)),src:'журнал, '+ex.length+' поїздок'};
+  const m=priors()[z];if(m===undefined)return{min:0,src:''};
+  const b=base(h),o=med(idleRecs().map(j=>j.idleAfter));
+  const f=(b!=null&&o!=null&&b>o*1.5)?Math.max(.4,o/b):1;
+  return{min:m*f,src:'ручний'+(f<1?', затишшя ×'+f.toFixed(1):'')};
+}
+function kcorr(){
+  const r=journal.filter(j=>j.act!=null&&j.ptt>0&&!j.auto).slice(-30).map(j=>j.act/j.ptt);
+  return r.length>=5?{k:Math.min(1.6,Math.max(.7,med(r))),n:r.length}:{k:1,n:r.length};
+}
+
+function calc(){
+  const S=num('sum'),c=num('comm'),p=cfg.p[cfg.plat],norm=cfg.norm||500;
+  const k=p.gross?Math.max(0,1-c/100):1;
+  const net=S*k, pu=num('pu'),tr=num('tr'),rt=num('rt'),P=pen($('zone').value.trim(),new Date().getHours()),tot=Math.max(pu+tr,pu+tr+rt+P.min);
+  const vd=$('vd'),root=document.documentElement.style;
+  if(!S||!tot){$('vw').textContent='—';$('vr').textContent='введи суму й час';$('vs').textContent='';root.setProperty('--v','#8d94a1');return null}
+  const rate=net/tot*60, need=norm*tot/60/(k||1), fit=net/norm*60, diff=fit-tot;
+  const ok=rate>=norm, near=!ok&&rate>=norm*0.9;
+  $('vw').textContent=ok?'БРАТИ':near?'НА МЕЖІ':'НЕ БРАТИ';
+  root.setProperty('--v',ok?'#34c47c':near?'#f0b429':'#ef5350');
+  $('vr').textContent=Math.round(rate)+' грн/год';
+  $('vs').innerHTML=`на руки ${net.toFixed(0)} грн за ${tot.toFixed(0)} хв<br>вигідно до ${fit.toFixed(0)} хв (${diff>=0?'запас ':'перебір '}${Math.abs(diff).toFixed(0)} хв)<br>мінімальна ціна для цього часу: ${Math.ceil(need)} грн${p.gross?' (до комісії)':''}${P.min?`<br>район ${$('zone').value.trim()}: ${P.min>0?'+':''}${Math.round(P.min)} хв простою (${P.src})`:''}`;
+  return {S,net,tot,rate,ok,pu,tr,rt,pen:P.min};
+}
+
+document.querySelectorAll('#plat button').forEach(b=>b.onclick=()=>{cfg.plat=b.dataset.p;saveCfg();loadPlat();calc()});
+$('gross').onclick=()=>{const p=cfg.p[cfg.plat];p.gross=!p.gross;saveCfg();loadPlat();calc()};
+$('comm').oninput=()=>{cfg.p[cfg.plat].comm=$('comm').value;saveCfg();calc()};
+$('key').oninput=()=>{cfg.key=$('key').value.trim();saveCfg();if(map){map.remove();map=null}};
+$('city').oninput=()=>{cfg.city=$('city').value.trim();saveCfg()};
+$('zp').oninput=()=>{cfg.zp=$('zp').value;saveCfg();calc()};
+$('spd').oninput=()=>{cfg.spd=num('spd')||25;saveCfg()};
+$('norm').oninput=()=>{cfg.norm=num('norm')||500;saveCfg();calc()};
+['sum','pu','tr','rt','kpu','ktr','zone'].forEach(i=>$(i).oninput=calc);
+['pu','tr'].forEach(i=>$(i).addEventListener('input',()=>{rawPtt=0}));
+$('clr').onclick=()=>{['sum','pu','tr','rt','kpu','ktr','adr1','adr2','zone'].forEach(i=>$(i).value='');rawPtt=0;$('st').textContent='';calc()};
+
+/* журнал */
+function renderJ(){
+  $('jn').textContent=journal.length;
+  const by={};journal.filter(j=>j.act!=null&&j.net).forEach(j=>{const o=by[j.plat]||(by[j.plat]={n:0,net:0,min:0});o.n++;o.net+=j.net;o.min+=j.act+(j.idleAfter||0)});
+  const kc=kcorr();
+  $('jst').innerHTML=Object.entries(by).map(([p,o])=>`<div><span>${p} · ${o.n} поїздок</span><span>${o.min?Math.round(o.net/o.min*60):0} грн/год з простоєм</span></div>`).join('')+
+    `<div><span>Поправка трафіку</span><span>×${kc.k.toFixed(2)} (${kc.n}${kc.n<5?', ще мало':''})</span></div>`;
+  $('jl').innerHTML=journal.slice(-15).reverse().map(j=>{const d=new Date(j.t);return `<div><span>${d.toLocaleDateString('uk',{weekday:'short'})} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')} · ${j.plat}${j.zone?' · '+j.zone:''}${j.own?' · своє':''}${j.manual?' · вручну':''}</span><span>${Math.round(j.net||0)} грн / ${Math.round(j.act??j.tot??0)} хв${j.idleAfter!=null?' +'+Math.round(j.idleAfter)+' пр.':''}<b class="x" data-id="${j.id}">✕</b></span></div>`}).join('');
+}
+$('jl').onclick=e=>{const x=e.target.closest('.x');if(!x||!confirm('Видалити запис?'))return;journal=journal.filter(j=>String(j.id)!==x.dataset.id);save()};
+const last=()=>journal[journal.length-1];
+const netOf=(S,pl)=>{const p=cfg.p[pl]||{},c=parseFloat(p.comm)||0;return p.gross?S*(1-c/100):S};
+let earlyOpen=false;
+function save(){SV('journal',journal);renderJ();tick()}
+function tick(){
+  const L=last(),bar=$('act');
+  if(!L||(L.tEnd&&(L.idleAfter!=null||L.brk))){bar.hidden=true;return}
+  bar.hidden=false;
+  const trip=!L.tEnd,m=Math.round((Date.now()-(L.tEnd||L.t))/60000);
+  $('actt').textContent=trip?(L.own?'Своє замовлення: ':'У дорозі: ')+m+' хв':(L.tStand?'Стою: '+Math.round((Date.now()-L.tStand)/60000)+' хв (після поїздки '+m+')':'Після поїздки: '+m+' хв');
+  $('fin').hidden=!trip;$('early').hidden=!trip;$('stand').hidden=trip||!!L.tStand;$('brk').hidden=trip;
+  $('earlyrow').hidden=!(trip&&earlyOpen);$('ownrow').hidden=!(trip&&L.own&&!L.sum);
+}
+setInterval(tick,15000);
+function closePrev(now){
+  const L=last();if(!L)return;
+  if(!L.tEnd){L.tEnd=now;L.auto=true}
+  else if(L.idleAfter==null&&!L.brk){const m=(now-L.tEnd)/60000;if(m<=120){L.idleAfter=m;if(L.tStand)L.standMin=(now-L.tStand)/60000}else L.brk=true}
+}
+function finish(tEnd){
+  const L=last();if(!L||L.tEnd)return;
+  L.tEnd=Math.max(L.t+60000,tEnd);L.act=(L.tEnd-L.t)/60000;
+  if(L.own&&!L.sum){const S=parseFloat($('ownsum').value)||0;L.sum=S;L.net=S?netOf(S,L.plat):null;$('ownsum').value=''}
+  earlyOpen=false;save();
+}
+$('take').onclick=()=>{
+  const r=calc();if(!r)return;const now=Date.now();closePrev(now);
+  journal.push({id:now,t:now,plat:cfg.plat,sum:r.S,net:r.net,tot:r.tot,pu:r.pu,tr:r.tr,rt:r.rt,pen:r.pen,zone:$('zone').value.trim(),ptt:rawPtt,kpu:num('kpu'),ktr:num('ktr'),comm:num('comm'),gross:cfg.p[cfg.plat].gross,tEnd:null,act:null,idleAfter:null});
+  $('clr').click();save();$('st').textContent='Взято: таймер пішов. Після висадки натисни «Завершив»';
+};
+$('own').onclick=()=>{
+  const now=Date.now(),S=num('sum');closePrev(now);
+  journal.push({id:now,t:now,plat:cfg.plat,own:true,sum:S,net:S?netOf(S,cfg.plat):null,zone:$('zone').value.trim(),tEnd:null,act:null,idleAfter:null});
+  $('clr').click();save();$('st').textContent='Своє замовлення: таймер пішов';
+};
+$('fin').onclick=()=>finish(Date.now());
+$('early').onclick=()=>{earlyOpen=!earlyOpen;tick()};
+$('agok').onclick=()=>{const m=parseFloat($('ago').value)||0;$('ago').value='';finish(Date.now()-m*60000)};
+$('stand').onclick=()=>{const L=last();if(L&&L.tEnd&&!L.tStand){L.tStand=Date.now();save()}};
+$('brk').onclick=()=>{const L=last();if(L&&L.tEnd&&L.idleAfter==null){L.brk=true;save()}};
+$('m_add').onclick=()=>{
+  const S=num('m_sum'),dur=num('m_dur');if(!S||!dur){$('st').textContent='Впиши суму й тривалість';return}
+  const tEnd=Date.now()-num('m_ago')*60000,idle=$('m_idle').value!==''?num('m_idle'):null;
+  journal.push({id:tEnd,t:tEnd-dur*60000,tEnd,act:dur,tot:dur,plat:cfg.plat,sum:S,net:netOf(S,cfg.plat),zone:$('m_zone').value.trim(),manual:true,idleAfter:idle,brk:idle==null});
+  journal.sort((a,b)=>a.t-b.t);['m_sum','m_dur','m_ago','m_idle','m_zone'].forEach(i=>$(i).value='');save();$('st').textContent='Додано в журнал';
+};
+$('exp').onclick=()=>{
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({cfg:{...cfg,key:''},journal})],{type:'application/json'}));
+  a.download='taxi-journal-'+new Date().toISOString().slice(0,10)+'.json';a.click();
+};
+$('imp').onchange=async e=>{
+  try{const d=JSON.parse(await e.target.files[0].text());
+    if(Array.isArray(d.journal)){journal=d.journal;SV('journal',journal)}
+    if(d.cfg){const k=cfg.key;cfg=d.cfg;cfg.key=k;saveCfg()}
+    loadPlat();renderJ();calc();$('st').textContent='Імпортовано'}catch(x){$('st').textContent='Файл не вдалося прочитати'}
+};
+
+/* розпізнавання скріну */
+let worker=null,wp=null;
+function getWorker(){
+  if(!wp)wp=Tesseract.createWorker('ukr+eng').then(w=>worker=w).catch(e=>{wp=null;throw e});
+  return wp;
+}
+window.addEventListener('load',()=>{try{getWorker()}catch(e){}});
+
+function toCanvas(file){return new Promise((res,rej)=>{
+  const im=new Image();im.onload=()=>{const s=Math.min(1,900/im.width),c=document.createElement('canvas');
+    c.width=im.width*s;c.height=im.height*s;const x=c.getContext('2d');x.drawImage(im,0,0,c.width,c.height);res(c)};
+  im.onerror=rej;im.src=URL.createObjectURL(file)})}
+
+function parse(t){
+  t=t.replace(/(\d)[,](\d)/g,'$1.$2').replace(/(\d)\s+(\d{3})\b/g,'$1$2');
+  const o={};
+  const sums=[...t.matchAll(/(\d+(?:\.\d+)?)\s*(?:₴|грн|uah)(?!\s*\/)/gi)].map(x=>+x[1]);
+  if(sums.length)o.sum=Math.max(...sums);
+  if(/bolt|вирахування|комісі/i.test(t))o.plat='bolt';
+  else if(/uklon|укл|поїздок\s*:|баланс|₴\s*\/\s*км/i.test(t))o.plat='uklon';
+  const pairs=[...t.matchAll(/(\d+)\s*(?:хв|min|мин)[^\d\n]{0,5}(\d+(?:\.\d+)?)\s*(?:км|km)/gi)];
+  if(pairs.length>=2){o.pu=pairs[0][1];o.kpu=pairs[0][2];o.tr=pairs[1][1];o.ktr=pairs[1][2]}
+  else{
+    const mins=[...t.matchAll(/(\d+(?:\.\d+)?)\s*(?:хв|min|мин)/gi)].map(x=>x[1]);
+    const kms=[...t.matchAll(/(\d+(?:\.\d+)?)\s*(?:км|km)/gi)].map(x=>x[1]);
+    if(mins[0])o.pu=mins[0]; if(mins[1])o.tr=mins[1];
+    if(o.plat==='uklon'&&!mins.length){ if(kms[0])o.ktr=kms[0]; if(kms[1])o.kpu=kms[1] }
+    else{ if(kms[0])o.kpu=kms[0]; if(kms[1])o.ktr=kms[1] }
+  }
+  const zm=t.match(/^.{2,40}?\s*(?:→|->|—>|=>|›)\s*(.{2,40})$/m);if(zm)o.z=zm[1].trim();
+  let L=t.split('\n').map(x=>x.trim()).filter(Boolean),M=[];
+  for(let i=0;i<L.length;i++){let x=L[i];if(x.includes('(')&&!x.includes(')')&&L[i+1]){x+=' '+L[++i]}M.push(x)}
+  const al=M.filter(x=>/(вулиц|вул\.|проспект|просп\.|площа|пл\.|провулок|бульвар|шосе|набережна|алея|узвіз|майдан)/i.test(x));
+  if(al.length>=2){o.a1=al[0];o.a2=al[1]}
+  return o;
+}
+$('shot').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;e.target.value='';
+  const T=performance.now();rawPtt=0;$('st').textContent='Розпізнаю…';
+  try{
+    const c=await toCanvas(f);await getWorker();
+    const r=await worker.recognize(c);
+    $('raw').textContent=r.data.text;
+    const o=parse(r.data.text);
+    if(o.plat){cfg.plat=o.plat;saveCfg();loadPlat()}
+    ['sum','pu','tr','kpu','ktr'].forEach(k=>{if(o[k])$(k).value=o[k]});
+    if(o.a1){$('adr1').value=o.a1;$('adr2').value=o.a2}
+    if(o.z)$('zone').value=o.z;
+    let note=Object.keys(o).length?'Перевір цифри й поправ, якщо треба':'Нічого не знайшов — введи вручну';
+    calc();
+    const noMin=!o.pu&&!o.tr;
+    if(o.a1&&cfg.key&&noMin){await runTT();note=$('st').textContent}
+    else if(noMin&&(o.kpu||o.ktr)){
+      const v=cfg.spd||25;
+      if(o.kpu)$('pu').value=Math.max(1,Math.round(o.kpu/v*60));
+      if(o.ktr)$('tr').value=Math.max(1,Math.round(o.ktr/v*60));
+      note='Хвилин на екрані немає: оцінив за км при '+v+' км/год (TomTom точніше, якщо вставити ключ).';
+    }
+    calc();
+    $('st').textContent=note+' · '+((performance.now()-T)/1000).toFixed(1)+' с';
+  }catch(x){$('st').textContent=typeof Tesseract==='undefined'?'Модуль розпізнавання не завантажився: відкрий сторінку з github.io у Safari (у чаті інтернет заблоковано). Введи вручну.':'Помилка розпізнавання: '+(x&&x.message||x)+'. Введи вручну.'}
+};
+
+/* TomTom */
+let map=null;
+const tt=async u=>{const r=await fetch(u);if(!r.ok)throw new Error('TomTom '+r.status);return r.json()};
+const gps=()=>new Promise((ok,no)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>ok([p.coords.latitude,p.coords.longitude]),no,{enableHighAccuracy:true,timeout:6000,maximumAge:15000}):no());
+async function geo(a){
+  const q=/\(/.test(a)?a.replace(/[()]/g,' '):a+', '+(cfg.city||'Львів');
+  const d=await tt('https://api.tomtom.com/search/2/geocode/'+encodeURIComponent(q)+'.json?key='+cfg.key+'&limit=1&countrySet=UA&language=uk-UA');
+  const p=d.results&&d.results[0];if(!p)throw new Error('Адресу не знайдено: '+a);
+  const r=[p.position.lat,p.position.lon];r.loc=p.address&&(p.address.municipalitySubdivision||p.address.localName)||'';return r;
+}
+async function route(a,b){
+  const d=await tt('https://api.tomtom.com/routing/1/calculateRoute/'+a+':'+b+'/json?key='+cfg.key+'&traffic=true&computeTravelTimeFor=all');
+  const s=d.routes[0].summary;
+  return {min:s.travelTimeInSeconds/60,free:(s.noTrafficTravelTimeInSeconds||s.travelTimeInSeconds)/60,km:s.lengthInMeters/1000};
+}
+async function runTT(){
+  if(!cfg.key){$('st').textContent='Встав ключ TomTom у налаштуваннях';return}
+  const A=$('adr1').value.trim(),B=$('adr2').value.trim();
+  if(!A||!B){$('st').textContent='Впиши обидві адреси';return}
+  $('st').textContent='TomTom рахує…';
+  try{
+    const [me,pa,pb]=await Promise.all([gps().catch(()=>null),geo(A),geo(B)]);
+    const [r1,r2]=await Promise.all([me?route(me,pa):null,route(pa,pb)]);
+    const K=kcorr(),k=K.k;let msg='';
+    if(r1){$('pu').value=Math.max(1,Math.round(r1.min*k));$('kpu').value=r1.km.toFixed(1);msg+='підʼїзд '+Math.round(r1.min*k)+' хв'}
+    else msg+='GPS недоступний — підʼїзд введи сам';
+    $('tr').value=Math.max(1,Math.round(r2.min*k));$('ktr').value=r2.km.toFixed(1);
+    msg+=', поїздка '+Math.round(r2.min*k)+' хв';
+    if(k!==1)msg+=' (поправка Львова ×'+k.toFixed(2)+')';
+    rawPtt=r1?r1.min+r2.min:0;
+    if(!$('zone').value&&pb.loc)$('zone').value=pb.loc;
+    $('st').textContent='TomTom: '+msg;calc();
+  }catch(x){$('st').textContent=String(x.message||x)}
+}
+$('ttb').onclick=runTT;
+let flow=null;
+const flowUrl=()=>'https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key='+cfg.key+'&t='+Date.now();
+$('md').addEventListener('toggle',()=>{
+  if(!$('md').open||map)return;
+  if(!cfg.key){$('mst').textContent='Спочатку встав ключ TomTom у налаштуваннях';return}
+  $('mst').textContent='';
+  map=L.map('map').setView([49.8397,24.0297],12);
+  L.tileLayer('https://api.tomtom.com/map/1/tile/basic/night/{z}/{x}/{y}.png?key='+cfg.key+'&language=uk-UA',{maxZoom:18,attribution:'© TomTom'}).addTo(map);
+  flow=L.tileLayer(flowUrl(),{maxZoom:18,opacity:.9}).addTo(map);
+  setTimeout(()=>map.invalidateSize(),200);
+});
+$('mref').onclick=()=>{if(flow)flow.setUrl(flowUrl())};
+$('mme').onclick=async()=>{if(!map)return;try{const p=await gps();map.setView(p,14);L.circleMarker(p,{radius:8,color:'#34c47c'}).addTo(map)}catch(e){$('mst').textContent='GPS недоступний'}};
+
+loadPlat();renderJ();calc();tick();
+</script>
+</body>
+</html>
