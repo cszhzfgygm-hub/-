@@ -95,6 +95,7 @@ pre{white-space:pre-wrap;font-size:11px;color:var(--mute)}
   <div><label>Куди</label><input class="t" id="adr2" type="text"></div>
 </div>
 <div class="row"><div><label>Район висадки (впливає на простій після поїздки)</label><input class="t" id="zone" type="text"></div></div>
+<div class="row"><div class="tog"><span>Висадка <b>за містом</b> (передмістя, села)</span><button class="sw" id="outsw" aria-label="За містом"></button></div></div>
 <div class="row"><button class="btn" id="ttb">⏱ Час із трафіком (TomTom)</button></div>
 
 <div class="row c2">
@@ -108,8 +109,8 @@ pre{white-space:pre-wrap;font-size:11px;color:var(--mute)}
   <div class="row" style="margin-top:10px"><div><label>Норма заробітку, грн/год</label><input id="norm" type="number" inputmode="decimal"></div></div>
   <div class="row"><div><label>Середня швидкість у місті, км/год (для оцінки часу, коли на екрані тільки км)</label><input id="spd" type="number" inputmode="decimal"></div></div>
   <div class="row"><div><label>Ключ TomTom (зберігається лише в цьому телефоні)</label><input class="t" id="key" type="text" autocomplete="off" autocapitalize="off"></div></div>
-  <div class="row"><div><label>Місто за замовчуванням для адрес</label><input class="t" id="city" type="text"></div></div>
-  <div class="row"><div><label>Додатковий простій за район, хв (рядок: Район = хвилини)</label><textarea class="t" id="zp" rows="3" style="font-size:15px"></textarea></div></div>
+  <div class="row"><div><label>Додатковий простій, якщо висадка за містом, хв (для всіх околиць)</label><input id="outmin" type="number" inputmode="decimal"></div></div>
+  <div class="row"><div><label>Окремі райони й села, хв (рядок: Район = хвилини; перебиває загальне «за містом»)</label><textarea class="t" id="zp" rows="3" style="font-size:15px"></textarea></div></div>
   <div class="log">Комісія і перемикач «до комісії» запамʼятовуються окремо для Bolt і Uklon. Пальне, TomTom і карта — наступні кроки.</div>
 </details>
 
@@ -130,13 +131,15 @@ pre{white-space:pre-wrap;font-size:11px;color:var(--mute)}
   <div class="log" id="jl"></div>
 </details>
 
-<details id="md"><summary>Карта трафіку</summary>
-  <div class="row c2" style="margin-top:10px"><button class="btn" id="mref">Оновити</button><button class="btn" id="mme">Я тут</button></div>
+<div id="md" style="margin-bottom:10px">
+  <div style="font-weight:600;margin:4px 0 8px">Карта трафіку</div>
+  <div class="row c2"><button class="btn" id="mref">Оновити</button><button class="btn" id="mme">Я тут</button></div>
   <div class="log" id="mst"></div><div id="map"></div>
-</details>
+</div>
 
 <details><summary>Що розпізнав скрін</summary><pre id="raw">—</pre></details>
 
+<div class="log" style="text-align:center">версія v9</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
@@ -155,7 +158,7 @@ function loadPlat(){
   const p=cfg.p[cfg.plat];
   $('gross').classList.toggle('on',p.gross);
   $('comm').value=p.comm;
-  $('norm').value=cfg.norm;$('spd').value=cfg.spd||25;$('key').value=cfg.key||'';$('zp').value=cfg.zp||'';$('city').value=cfg.city||'Львів';
+  $('norm').value=cfg.norm;$('spd').value=cfg.spd||25;$('key').value=cfg.key||'';$('zp').value=cfg.zp||'';$('outmin').value=cfg.out??20;
 }
 function saveCfg(){SV('cfg',cfg)}
 
@@ -170,16 +173,21 @@ function base(h){
   const all=r.map(j=>j.idleAfter);return all.length>=3?med(all):null;
 }
 function priors(){const o={};(cfg.zp||'').split('\n').forEach(l=>{const m=l.match(/^(.+?)\s*[=:]\s*(-?\d+(?:[.,]\d+)?)/);if(m)o[m[1].trim().toLowerCase()]=parseFloat(m[2].replace(',','.'))});return o}
-function pen(zone,h){
-  if(!zone)return{min:0,src:''};
-  const z=zone.toLowerCase(),ex=idleRecs().filter(j=>(j.zone||'').toLowerCase()===z).map(j=>({h:hr(j.tEnd),e:j.idleAfter-(base(hr(j.tEnd))||0)}));
-  const near=ex.filter(x=>hd(x.h,h)<=2).map(x=>x.e);
-  if(near.length>=3)return{min:med(near),src:'журнал, '+near.length+' поїздок в цей час'};
-  if(ex.length>=3)return{min:med(ex.map(x=>x.e)),src:'журнал, '+ex.length+' поїздок'};
-  const m=priors()[z];if(m===undefined)return{min:0,src:''};
-  const b=base(h),o=med(idleRecs().map(j=>j.idleAfter));
-  const f=(b!=null&&o!=null&&b>o*1.5)?Math.max(.4,o/b):1;
-  return{min:m*f,src:'ручний'+(f<1?', затишшя ×'+f.toFixed(1):'')};
+function pen(zone,h,out){
+  const rec=idleRecs(),ex=l=>l.map(j=>({h:hr(j.tEnd),e:j.idleAfter-(base(hr(j.tEnd))||0)}));
+  const pick=(e,src)=>{
+    const near=e.filter(x=>hd(x.h,h)<=2).map(x=>x.e);
+    if(near.length>=3)return{min:med(near),src:'журнал: '+src+', '+near.length+' поїздок в цей час'};
+    if(e.length>=3)return{min:med(e.map(x=>x.e)),src:'журнал: '+src+', '+e.length+' поїздок'};
+    return null};
+  const z=(zone||'').toLowerCase();let r=null;
+  if(z)r=pick(ex(rec.filter(j=>(j.zone||'').toLowerCase()===z)),zone);
+  if(!r&&out)r=pick(ex(rec.filter(j=>j.out)),'за містом');
+  if(r)return r;
+  const m=z?priors()[z]:undefined,v=m!==undefined?m:(out?(cfg.out??20):undefined);
+  if(v===undefined)return{min:0,src:''};
+  const b=base(h),o=med(rec.map(j=>j.idleAfter)),f=(b!=null&&o!=null&&b>o*1.5)?Math.max(.4,o/b):1;
+  return{min:v*f,src:(m!==undefined?'ручний':'за містом')+(f<1?', затишшя ×'+f.toFixed(1):'')};
 }
 function kcorr(){
   const r=journal.filter(j=>j.act!=null&&j.ptt>0&&!j.auto).slice(-30).map(j=>j.act/j.ptt);
@@ -189,7 +197,7 @@ function kcorr(){
 function calc(){
   const S=num('sum'),c=num('comm'),p=cfg.p[cfg.plat],norm=cfg.norm||500;
   const k=p.gross?Math.max(0,1-c/100):1;
-  const net=S*k, pu=num('pu'),tr=num('tr'),rt=num('rt'),P=pen($('zone').value.trim(),new Date().getHours()),tot=Math.max(pu+tr,pu+tr+rt+P.min);
+  const net=S*k, pu=num('pu'),tr=num('tr'),rt=num('rt'),P=pen($('zone').value.trim(),new Date().getHours(),isOut()),tot=Math.max(pu+tr,pu+tr+rt+P.min);
   const vd=$('vd'),root=document.documentElement.style;
   if(!S||!tot){$('vw').textContent='—';$('vr').textContent='введи суму й час';$('vs').textContent='';root.setProperty('--v','#8d94a1');return null}
   const rate=net/tot*60, need=norm*tot/60/(k||1), fit=net/norm*60, diff=fit-tot;
@@ -197,7 +205,7 @@ function calc(){
   $('vw').textContent=ok?'БРАТИ':near?'НА МЕЖІ':'НЕ БРАТИ';
   root.setProperty('--v',ok?'#34c47c':near?'#f0b429':'#ef5350');
   $('vr').textContent=Math.round(rate)+' грн/год';
-  $('vs').innerHTML=`на руки ${net.toFixed(0)} грн за ${tot.toFixed(0)} хв<br>вигідно до ${fit.toFixed(0)} хв (${diff>=0?'запас ':'перебір '}${Math.abs(diff).toFixed(0)} хв)<br>мінімальна ціна для цього часу: ${Math.ceil(need)} грн${p.gross?' (до комісії)':''}${P.min?`<br>район ${$('zone').value.trim()}: ${P.min>0?'+':''}${Math.round(P.min)} хв простою (${P.src})`:''}`;
+  $('vs').innerHTML=`на руки ${net.toFixed(0)} грн за ${tot.toFixed(0)} хв<br>вигідно до ${fit.toFixed(0)} хв (${diff>=0?'запас ':'перебір '}${Math.abs(diff).toFixed(0)} хв)<br>мінімальна ціна для цього часу: ${Math.ceil(need)} грн${p.gross?' (до комісії)':''}${P.min?`<br>${$('zone').value.trim()||'за містом'}: ${P.min>0?'+':''}${Math.round(P.min)} хв простою (${P.src})`:''}`;
   return {S,net,tot,rate,ok,pu,tr,rt,pen:P.min};
 }
 
@@ -205,13 +213,16 @@ document.querySelectorAll('#plat button').forEach(b=>b.onclick=()=>{cfg.plat=b.d
 $('gross').onclick=()=>{const p=cfg.p[cfg.plat];p.gross=!p.gross;saveCfg();loadPlat();calc()};
 $('comm').oninput=()=>{cfg.p[cfg.plat].comm=$('comm').value;saveCfg();calc()};
 $('key').oninput=()=>{cfg.key=$('key').value.trim();saveCfg();if(map){map.remove();map=null}};
-$('city').oninput=()=>{cfg.city=$('city').value.trim();saveCfg()};
+$('key').addEventListener('change',()=>initMap());
+$('outmin').oninput=()=>{cfg.out=num('outmin');saveCfg();calc()};
+$('outsw').onclick=()=>{$('outsw').classList.toggle('on');calc()};
+const isOut=()=>$('outsw').classList.contains('on');
 $('zp').oninput=()=>{cfg.zp=$('zp').value;saveCfg();calc()};
 $('spd').oninput=()=>{cfg.spd=num('spd')||25;saveCfg()};
 $('norm').oninput=()=>{cfg.norm=num('norm')||500;saveCfg();calc()};
 ['sum','pu','tr','rt','kpu','ktr','zone'].forEach(i=>$(i).oninput=calc);
 ['pu','tr'].forEach(i=>$(i).addEventListener('input',()=>{rawPtt=0}));
-$('clr').onclick=()=>{['sum','pu','tr','rt','kpu','ktr','adr1','adr2','zone'].forEach(i=>$(i).value='');rawPtt=0;$('st').textContent='';calc()};
+$('clr').onclick=()=>{['sum','pu','tr','rt','kpu','ktr','adr1','adr2','zone'].forEach(i=>$(i).value='');rawPtt=0;$('outsw').classList.remove('on');$('st').textContent='';calc()};
 
 /* журнал */
 function renderJ(){
@@ -250,12 +261,12 @@ function finish(tEnd){
 }
 $('take').onclick=()=>{
   const r=calc();if(!r)return;const now=Date.now();closePrev(now);
-  journal.push({id:now,t:now,plat:cfg.plat,sum:r.S,net:r.net,tot:r.tot,pu:r.pu,tr:r.tr,rt:r.rt,pen:r.pen,zone:$('zone').value.trim(),ptt:rawPtt,kpu:num('kpu'),ktr:num('ktr'),comm:num('comm'),gross:cfg.p[cfg.plat].gross,tEnd:null,act:null,idleAfter:null});
+  journal.push({id:now,t:now,plat:cfg.plat,sum:r.S,net:r.net,tot:r.tot,pu:r.pu,tr:r.tr,rt:r.rt,pen:r.pen,zone:$('zone').value.trim(),out:isOut(),ptt:rawPtt,kpu:num('kpu'),ktr:num('ktr'),comm:num('comm'),gross:cfg.p[cfg.plat].gross,tEnd:null,act:null,idleAfter:null});
   $('clr').click();save();$('st').textContent='Взято: таймер пішов. Після висадки натисни «Завершив»';
 };
 $('own').onclick=()=>{
   const now=Date.now(),S=num('sum');closePrev(now);
-  journal.push({id:now,t:now,plat:cfg.plat,own:true,sum:S,net:S?netOf(S,cfg.plat):null,zone:$('zone').value.trim(),tEnd:null,act:null,idleAfter:null});
+  journal.push({id:now,t:now,plat:cfg.plat,own:true,sum:S,net:S?netOf(S,cfg.plat):null,zone:$('zone').value.trim(),out:isOut(),tEnd:null,act:null,idleAfter:null});
   $('clr').click();save();$('st').textContent='Своє замовлення: таймер пішов';
 };
 $('fin').onclick=()=>finish(Date.now());
@@ -310,8 +321,10 @@ function prep(c,{crop,inv,w}){
   for(let i=0;i<d.length;i+=4){const v=Math.max(0,Math.min(255,(d[i]-lo)*k));d[i]=d[i+1]=d[i+2]=v}
   x.putImageData(im,0,0);return o;
 }
-const LAT={a:'а',A:'А',B:'В',c:'с',C:'С',e:'е',E:'Е',H:'Н',i:'і',I:'І',k:'к',K:'К',M:'М',o:'о',O:'О',p:'р',P:'Р',T:'Т',x:'х',X:'Х',y:'у'};
-const fixLat=t=>t.split('\n').map(l=>(l.match(/[а-яіїєґА-ЯІЇЄҐ]/g)||[]).length>=3?l.replace(/[aABcCeEHiIkKMoOpPTxXy]/g,m=>LAT[m]):l).join('\n');
+const PH={a:'а',b:'ь',c:'с',d:'д',e:'е',h:'н',i:'и',k:'к',l:'л',m:'м',n:'п',o:'о',p:'р',r:'г',t:'т',u:'и',x:'х',y:'у',B:'в',H:'н',T:'т',M:'м',K:'к',A:'а',E:'е',C:'с',O:'о',P:'р',X:'х',Y:'у',I:'і',N:'н'};
+const fixAddr=l=>l.replace(/[A-Za-zА-Яа-яІіЇїЄєҐґ]+/g,w=>{
+  if(!/[а-яіїєґА-ЯІЇЄҐ]/.test(w)||!/[a-zA-Z]/.test(w))return w;
+  return w.replace(/[a-zA-Z]/g,(ch,i)=>{const m=PH[ch];return m?(i===0?m.toUpperCase():m):ch})});
 
 function parse(t,loose){
   t=t.replace(/(\d)[,](\d)/g,'$1.$2').replace(/(\d)\s+(\d{3})\b/g,'$1$2');
@@ -330,25 +343,30 @@ function parse(t,loose){
     if(o.plat==='uklon'&&!mins.length){ if(kms[0])o.ktr=kms[0]; if(kms[1])o.kpu=kms[1] }
     else{ if(kms[0])o.kpu=kms[0]; if(kms[1])o.ktr=kms[1] }
   }
-  const zm=t.match(/^.{2,40}?\s*(?:→|->|—>|=>|›)\s*(.{2,40})$/m);if(zm)o.z=zm[1].trim();
+  const zm=t.match(/^.{2,40}?\s*(?:→|->|—>|=>|›)\s*(.{2,40})$/m);if(zm)o.z=fixAddr(zm[1].trim());
   let L=t.split('\n').map(x=>x.trim()).filter(Boolean),M=[];
   for(let i=0;i<L.length;i++){let x=L[i];if(x.includes('(')&&!x.includes(')')&&L[i+1]){x+=' '+L[++i]}M.push(x)}
   const al=M.filter(x=>/(вулиц|вул\.|проспект|просп\.|площа|пл\.|провулок|бульвар|шосе|набережна|алея|узвіз|майдан)/i.test(x));
-  if(al.length>=2){o.a1=al[0];o.a2=al[1]}
+  if(al.length>=2){o.a1=fixAddr(al[0]);o.a2=fixAddr(al[1])}
+  const rm=t.match(/(\d+\.\d+)\s*₴\s*\/\s*км/);if(rm)o.rate=+rm[1];
+  if(!o.sum&&o.rate&&o.ktr)o.sum=Math.round(o.rate*o.ktr);
   return o;
 }
 $('shot').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;e.target.value='';
-  const T=performance.now();rawPtt=0;$('st').textContent='Розпізнаю…';
+  const T=performance.now();rawPtt=0;$('outsw').classList.remove('on');$('st').textContent='Розпізнаю…';
   try{
     const base=await toCanvas(f);await getWorker();
     const r=await worker.recognize(prep(base,{inv:isDark(base),w:1300}));
-    let txt=fixLat(r.data.text),o=parse(txt);
+    let txt=r.data.text,o=parse(txt);
     if(!o.sum){
-      const r2=await worker.recognize(prep(base,{crop:[0,.25],inv:false,w:1400}));
-      const t2=fixLat(r2.data.text),o2=parse(t2,true);
-      if(o2.sum)o.sum=o2.sum;
-      txt+='\n--- верх екрана ---\n'+t2;
+      try{await worker.setParameters({tessedit_pageseg_mode:'6'})}catch(e){}
+      for(const inv of [false,true]){
+        const r2=await worker.recognize(prep(base,{crop:[.12,.27],inv,w:1600}));
+        const o2=parse(r2.data.text,true);txt+='\n--- верх екрана'+(inv?' (інверсія)':'')+' ---\n'+r2.data.text;
+        if(o2.sum){o.sum=o2.sum;break}
+      }
+      try{await worker.setParameters({tessedit_pageseg_mode:'3'})}catch(e){}
     }
     $('raw').textContent=txt;
     if(o.plat){cfg.plat=o.plat;saveCfg();loadPlat()}
@@ -374,11 +392,18 @@ $('shot').onchange=async e=>{
 let map=null;
 const tt=async u=>{const r=await fetch(u);if(!r.ok)throw new Error('TomTom '+r.status);return r.json()};
 const gps=()=>new Promise((ok,no)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>ok([p.coords.latitude,p.coords.longitude]),no,{enableHighAccuracy:true,timeout:6000,maximumAge:15000}):no());
-async function geo(a){
-  const q=/\(/.test(a)?a.replace(/[()]/g,' '):a+', '+(cfg.city||'Львів');
-  const d=await tt('https://api.tomtom.com/search/2/geocode/'+encodeURIComponent(q)+'.json?key='+cfg.key+'&limit=1&countrySet=UA&language=uk-UA');
-  const p=d.results&&d.results[0];if(!p)throw new Error('Адресу не знайдено: '+a);
-  const r=[p.position.lat,p.position.lon];r.loc=p.address&&(p.address.municipalitySubdivision||p.address.localName)||'';return r;
+const LV=[49.8397,24.0297];
+const dist=(a,b)=>{const R=6371,r=x=>x*Math.PI/180,dl=r(b[0]-a[0]),dn=r(b[1]-a[1]);const h=Math.sin(dl/2)**2+Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
+async function geo(a,c){
+  const q=encodeURIComponent(a.replace(/[()]/g,' ').replace(/\s+/g,' ').trim());
+  const base='https://api.tomtom.com/search/2/search/'+q+'.json?key='+cfg.key+'&limit=1&countrySet=UA&language=uk-UA&lat='+c[0]+'&lon='+c[1]+'&radius=70000';
+  let d=await tt(base+'&idxSet=Addr,Str,PAD');
+  if(!d.results||!d.results.length)d=await tt(base);
+  const p=d.results&&d.results[0];if(!p)throw new Error('Адресу не знайдено поруч: '+a+'. Поправ її вручну.');
+  const ad=p.address||{},inCity=/Львів/i.test(ad.municipality||'');
+  const r=[p.position.lat,p.position.lon];
+  r.loc=inCity?(ad.municipalitySubdivision||ad.localName||''):(ad.localName||ad.municipality||'');
+  r.out=!inCity;r.name=ad.freeformAddress||a;return r;
 }
 async function route(a,b){
   const d=await tt('https://api.tomtom.com/routing/1/calculateRoute/'+a+':'+b+'/json?key='+cfg.key+'&traffic=true&computeTravelTimeFor=all');
@@ -391,35 +416,41 @@ async function runTT(){
   if(!A||!B){$('st').textContent='Впиши обидві адреси';return}
   $('st').textContent='TomTom рахує…';
   try{
-    const [me,pa,pb]=await Promise.all([gps().catch(()=>null),geo(A),geo(B)]);
+    let me=await gps().catch(()=>null);
+    const c=me&&dist(me,LV)<80?me:LV;
+    const [pa,pb]=await Promise.all([geo(A,c),geo(B,c)]);
+    if(me&&dist(me,pa)>100)me=null;
     const [r1,r2]=await Promise.all([me?route(me,pa):null,route(pa,pb)]);
+    if(r2.km>200)throw new Error('Маршрут задовгий ('+Math.round(r2.km)+' км): адресу розпізнано неправильно. Поправ її вручну.');
     const K=kcorr(),k=K.k;let msg='';
     if(r1){$('pu').value=Math.max(1,Math.round(r1.min*k));$('kpu').value=r1.km.toFixed(1);msg+='підʼїзд '+Math.round(r1.min*k)+' хв'}
-    else msg+='GPS недоступний — підʼїзд введи сам';
+    else msg+='GPS недоступний або далеко від місця — підʼїзд введи сам';
     $('tr').value=Math.max(1,Math.round(r2.min*k));$('ktr').value=r2.km.toFixed(1);
     msg+=', поїздка '+Math.round(r2.min*k)+' хв';
     if(k!==1)msg+=' (поправка Львова ×'+k.toFixed(2)+')';
     rawPtt=r1?r1.min+r2.min:0;
     if(!$('zone').value&&pb.loc)$('zone').value=pb.loc;
-    $('st').textContent='TomTom: '+msg;calc();
+    $('outsw').classList.toggle('on',!!pb.out);
+    $('st').textContent='TomTom: '+msg+' · знайшов: '+pa.name+' → '+pb.name;calc();
   }catch(x){$('st').textContent=String(x.message||x)}
 }
 $('ttb').onclick=runTT;
 let flow=null;
 const flowUrl=()=>'https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key='+cfg.key+'&t='+Date.now();
-$('md').addEventListener('toggle',()=>{
-  if(!$('md').open||map)return;
-  if(!cfg.key){$('mst').textContent='Спочатку встав ключ TomTom у налаштуваннях';return}
+function initMap(){
+  if(map)return;
+  if(!cfg.key){$('mst').textContent='Встав ключ TomTom у налаштуваннях, щоб побачити карту';return}
   $('mst').textContent='';
-  map=L.map('map').setView([49.8397,24.0297],12);
+  map=L.map('map').setView(LV,12);
   L.tileLayer('https://api.tomtom.com/map/1/tile/basic/night/{z}/{x}/{y}.png?key='+cfg.key+'&language=uk-UA',{maxZoom:18,attribution:'© TomTom'}).addTo(map);
   flow=L.tileLayer(flowUrl(),{maxZoom:18,opacity:.9}).addTo(map);
-  setTimeout(()=>map.invalidateSize(),200);
-});
+  setTimeout(()=>map.invalidateSize(),300);
+}
+setInterval(()=>{if(flow)flow.setUrl(flowUrl())},180000);
 $('mref').onclick=()=>{if(flow)flow.setUrl(flowUrl())};
 $('mme').onclick=async()=>{if(!map)return;try{const p=await gps();map.setView(p,14);L.circleMarker(p,{radius:8,color:'#34c47c'}).addTo(map)}catch(e){$('mst').textContent='GPS недоступний'}};
 
-loadPlat();renderJ();calc();tick();
+loadPlat();renderJ();calc();tick();initMap();
 </script>
 </body>
 </html>
