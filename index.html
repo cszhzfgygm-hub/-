@@ -134,12 +134,13 @@ pre{white-space:pre-wrap;font-size:11px;color:var(--mute)}
 <div id="md" style="margin-bottom:10px">
   <div style="font-weight:600;margin:4px 0 8px">Карта трафіку</div>
   <div class="row c2"><button class="btn" id="mref">Оновити</button><button class="btn" id="mme">Я тут</button></div>
+  <div class="row c2"><button class="btn" id="mdiag">Перевірити TomTom</button><a class="btn" id="mg" target="_blank" rel="noopener" href="https://www.google.com/maps/@49.8397,24.0297,12z/data=!5m1!1e1">Трафік у Google Maps</a></div>
   <div class="log" id="mst"></div><div id="map"></div>
 </div>
 
 <details><summary>Що розпізнав скрін</summary><pre id="raw">—</pre></details>
 
-<div class="log" style="text-align:center">версія v10</div>
+<div class="log" style="text-align:center">версія v11</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
@@ -255,7 +256,7 @@ function closePrev(now){
 }
 function finish(tEnd){
   const L=last();if(!L||L.tEnd)return;
-  L.tEnd=Math.max(L.t+60000,tEnd);L.act=(L.tEnd-L.t)/60000;
+  L.tEnd=Math.min(Date.now(),Math.max(L.t+60000,tEnd));L.act=(L.tEnd-L.t)/60000;
   if(L.own&&!L.sum){const S=parseFloat($('ownsum').value)||0;L.sum=S;L.net=S?netOf(S,L.plat):null;$('ownsum').value=''}
   earlyOpen=false;save();
 }
@@ -376,7 +377,7 @@ $('shot').onchange=async e=>{
     ['sum','pu','tr','kpu','ktr'].forEach(k=>{if(o[k])$(k).value=o[k]});
     if(o.a1){$('adr1').value=o.a1;$('adr2').value=o.a2}
     if(o.z)$('zone').value=o.z;
-    let note=Object.keys(o).length?'Перевір цифри й поправ, якщо треба':'Нічого не знайшов — введи вручну';
+    let note='';
     calc();
     const noMin=!o.pu&&!o.tr;
     if(o.a1&&cfg.key&&noMin){await runTT();note=$('st').textContent}
@@ -386,10 +387,12 @@ $('shot').onchange=async e=>{
       if(o.ktr)$('tr').value=Math.max(1,Math.round(o.ktr/v*60));
       note='Хвилин на екрані немає: оцінив за км при '+v+' км/год (TomTom точніше, якщо вставити ключ).';
     }
-    const warn=!o.sum?' · суму не знайдено, введи вручну':(o.sumLoose||o.sumEst?' · суму розпізнано приблизно, перевір':'');
+    const warn=o.sum&&(o.sumLoose||o.sumEst)?' Суму розпізнано приблизно, перевір.':'';
     if(!o.sum||o.sumLoose||o.sumEst){try{$('sum').focus();$('sum').select()}catch(e){}}
     calc();
-    $('st').textContent=note+warn+' · '+((performance.now()-T)/1000).toFixed(1)+' с';
+    const miss=[['sum','суму'],['pu','підʼїзд'],['tr','поїздку']].filter(([k])=>!num(k)).map(x=>x[1]);
+    const head=miss.length?'Не знайшов: '+miss.join(', ')+' — введи вручну. ':'✓ Розпізнано: '+(cfg.plat==='bolt'?'Bolt':'Uklon')+', '+num('sum')+' ₴, підʼїзд '+num('pu')+' хв, поїздка '+num('tr')+' хв. ';
+    $('st').textContent=head+note+warn+' · '+((performance.now()-T)/1000).toFixed(1)+' с';
   }catch(x){$('st').textContent=typeof Tesseract==='undefined'?'Модуль розпізнавання не завантажився: відкрий сторінку з github.io у Safari (у чаті інтернет заблоковано). Введи вручну.':'Помилка розпізнавання: '+(x&&x.message||x)+'. Введи вручну.'}
 };
 
@@ -448,21 +451,33 @@ async function runTT(){
 }
 $('ttb').onclick=runTT;
 let flow=null;
-const flowUrl=()=>'https://api.tomtom.com/traffic/map/4/tile/flow/relative/{z}/{x}/{y}.png?key='+cfg.key+'&t='+Date.now();
+let flowStyle='relative';
+const flowUrl=()=>'https://api.tomtom.com/traffic/map/4/tile/flow/'+flowStyle+'/{z}/{x}/{y}.png?key='+cfg.key+'&t='+Date.now();
 function initMap(){
   if(map)return;
-  if(!cfg.key){$('mst').textContent='Встав ключ TomTom у налаштуваннях, щоб побачити карту';return}
-  if(typeof L==='undefined'){$('mst').textContent='Бібліотека карти не завантажилась (потрібен інтернет)';return}
+  if(!cfg.key){$('mst').textContent='Встав ключ TomTom у налаштуваннях, щоб побачити шар трафіку';return}
+  if(typeof L==='undefined'){$('mst').textContent='Бібліотека карти не завантажилась (потрібен інтернет). Скористайся кнопкою «Трафік у Google Maps».';return}
   try{
     $('mst').textContent='';
     map=L.map('map').setView(LV,12);
-    const bad=n=>{let c=0;return()=>{if(!c++)$('mst').textContent='Шар «'+n+'» не завантажується. Перевір ключ TomTom (потрібні Map Display і Traffic API) та обмеження за доменом.'}};
-    const b=L.tileLayer('https://api.tomtom.com/map/1/tile/basic/night/{z}/{x}/{y}.png?key='+cfg.key+'&language=uk-UA',{maxZoom:18,attribution:'© TomTom'}).addTo(map);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19,attribution:'© OpenStreetMap, © CARTO · трафік © TomTom'}).addTo(map);
     flow=L.tileLayer(flowUrl(),{maxZoom:18,opacity:.9}).addTo(map);
-    b.on('tileerror',bad('карта'));flow.on('tileerror',bad('трафік'));
+    let c=0;flow.on('tileerror',()=>{
+      if(flowStyle==='relative'&&!c){flowStyle='relative0';c=1;flow.setUrl(flowUrl());return}
+      $('mst').textContent='Шар трафіку TomTom не завантажується. Натисни «Перевірити TomTom» і надішли мені результат.'});
     setTimeout(()=>map.invalidateSize(),300);
   }catch(e){$('mst').textContent='Помилка карти: '+(e.message||e)}
 }
+$('mdiag').onclick=async()=>{
+  if(!cfg.key){$('mst').textContent='Спочатку встав ключ TomTom у налаштуваннях';return}
+  const z=12,x=Math.floor((LV[1]+180)/360*2**z),la=LV[0]*Math.PI/180,y=Math.floor((1-Math.asinh(Math.tan(la))/Math.PI)/2*2**z);
+  const T=[['карта','https://api.tomtom.com/map/1/tile/basic/night/'+z+'/'+x+'/'+y+'.png?key='+cfg.key],
+    ['трафік relative','https://api.tomtom.com/traffic/map/4/tile/flow/relative/'+z+'/'+x+'/'+y+'.png?key='+cfg.key],
+    ['трафік relative0','https://api.tomtom.com/traffic/map/4/tile/flow/relative0/'+z+'/'+x+'/'+y+'.png?key='+cfg.key]];
+  $('mst').textContent='Перевіряю…';const out=[];
+  for(const [n,u] of T){try{const r=await fetch(u);out.push(n+': '+r.status)}catch(e){out.push(n+': немає відповіді')}}
+  $('mst').textContent=out.join(' · ')+'  (200 = працює, 403 = ключ/домен/API не дозволені, 401 = ключ хибний)';
+};
 setInterval(()=>{if(flow)flow.setUrl(flowUrl())},60000);
 $('mref').onclick=()=>{if(flow)flow.setUrl(flowUrl())};
 $('mme').onclick=async()=>{if(!map)return;try{const p=await gps();map.setView(p,14);L.circleMarker(p,{radius:8,color:'#34c47c'}).addTo(map)}catch(e){$('mst').textContent='GPS недоступний'}};
